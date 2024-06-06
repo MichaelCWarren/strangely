@@ -1,6 +1,7 @@
+use std::io::Cursor;
 use std::path::Path;
 
-use clap::{command, Parser};
+use clap::Parser;
 use image::imageops::{overlay, FilterType};
 
 use rand::random;
@@ -8,10 +9,16 @@ use rustface::{read_model, ImageData};
 use uuid::Uuid;
 
 #[derive(Parser, Debug)]
-#[command(version, about, long_about = None)]
+#[clap(group(clap::ArgGroup::new("location").required(true).args(&["path", "url"])))]
 struct Args {
     #[arg(short, long)]
-    image: String,
+    path: Option<String>,
+
+    #[arg(short, long)]
+    url: Option<String>,
+
+    #[arg(short, long, default_value_t = 0.55_f32)]
+    scale: f32,
 }
 
 fn main() {
@@ -26,9 +33,26 @@ fn main() {
     detector.set_pyramid_scale_factor(0.8);
     detector.set_slide_window_step(4, 4);
 
-    let path = args.image.clone();
-    let path = Path::new(&path);
-    let mut img = image::open(args.image).unwrap();
+    let (mut img, filename, extension) = if let Some(path) = args.path {
+        let (stem, extension) = get_filename_and_extension(&path);
+        let img = image::open(path).unwrap();
+        (img, stem, extension)
+    } else if let Some(url) = args.url {
+        let mut bytes_reader = ureq::get(&url).call().unwrap().into_reader();
+        let mut buffer = vec![];
+        bytes_reader.read_to_end(&mut buffer).unwrap();
+
+        let img = image::io::Reader::new(Cursor::new(buffer))
+            .with_guessed_format()
+            .unwrap()
+            .decode()
+            .unwrap();
+
+        let (stem, extension) = get_filename_and_extension(&url);
+        (img, stem, extension)
+    } else {
+        panic!("no image available");
+    };
 
     let width = img.width();
     let height = img.height();
@@ -47,9 +71,9 @@ fn main() {
         let face_id = if random() { 1 } else { 0 };
         let bbox = face.bbox();
         let box_width = bbox.width();
-        let box_w_upscale = (box_width as f32 * 0.55) as u32;
+        let box_w_upscale = (box_width as f32 * args.scale) as u32;
         let box_height = bbox.height();
-        let box_h_upscale = (box_height as f32 * 0.55) as u32;
+        let box_h_upscale = (box_height as f32 * args.scale) as u32;
         let x_offset = box_w_upscale / 2;
         let y_offset = box_h_upscale / 2;
 
@@ -68,21 +92,26 @@ fn main() {
     }
 
     let id = Uuid::new_v4();
-    let stem = path
+    let output_filename = format!("./{}_{}.{}", filename, id.to_string(), extension);
+    println!("{output_filename}");
+
+    img.save(output_filename).unwrap();
+}
+
+fn get_filename_and_extension(path: &str) -> (String, String) {
+    let file_path = Path::new(&path);
+    let stem = file_path
         .file_stem()
         .unwrap()
         .to_os_string()
         .into_string()
         .unwrap();
-    let extension = path
+    let extension = file_path
         .extension()
         .unwrap()
         .to_os_string()
         .into_string()
         .unwrap();
 
-    let output_filename = format!("./{}_{}.{}", stem, id.to_string(), extension);
-    println!("{output_filename}");
-
-    img.save(output_filename).unwrap();
+    (stem, extension)
 }

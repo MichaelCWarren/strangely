@@ -9,3 +9,4 @@ clap = { version = "4.5.4", features = ["derive"] }
 image = "0.25.1"
 rand = "0.8.5"
 rustface = "0.1.7"
+ureq = "2.9.7"
